@@ -318,13 +318,34 @@ while True:
             clean_reply_digits = re.sub(r'\D', '', text)
 
             with LOCK:
+                # 1. ตรวจสอบความตรงกันแบบเจาะจง (Exact Target / Digit Match)
                 for target_key, data in list(PENDING_REQUESTS.items()):
-                    # ตรวจจับทั้งแบบมีขีดคั่น, ไม่มีขีดคั่น, หรือข้อความตรงๆ
-                    if target_key in text or (target_key.isdigit() and target_key in clean_reply_digits):
+                    if (target_key.lower() in text.lower()) or (target_key.isdigit() and len(target_key) >= 6 and target_key in clean_reply_digits):
                         matched_target = target_key
                         source_group = data["source_group"]
                         del PENDING_REQUESTS[target_key]
                         break
+
+                # 2. กรณีคำสั่งกลุ่มช่วยเหลือ/เมนูคำสั่ง (help, menu, วิธีใช้, คำสั่ง, คู่มือ)
+                if not matched_target:
+                    help_keys = ['help', 'menu', 'วิธีใช้', 'คำสั่ง', 'คู่มือ', 'เช็ค']
+                    is_help_reply = any(hk in text.lower() for hk in ['การใช้งาน', 'วิธีใช้', 'คำสั่ง', 'เช็ค', 'help'])
+                    for target_key, data in list(PENDING_REQUESTS.items()):
+                        cmd_txt = data.get("cmd", "").lower()
+                        if target_key.lower() in help_keys or any(hk in cmd_txt for hk in help_keys) or is_help_reply:
+                            matched_target = target_key
+                            source_group = data["source_group"]
+                            del PENDING_REQUESTS[target_key]
+                            break
+
+                # 3. Fallback: หากในคิวมีคำสั่งรออยู่เพียง 1 รายการ (Single Pending Request FIFO)
+                # เมื่อมีการส่งคำสั่งไป 1 ตัว และบอทปลายทางตอบข้อความกลับมาทันที ย่อมเป็นคำตอบของคำสั่งนั้นแน่นอน
+                if not matched_target and len(PENDING_REQUESTS) == 1:
+                    target_key, data = next(iter(PENDING_REQUESTS.items()))
+                    if time.time() - data.get("timestamp", 0) <= TIMEOUT_SECONDS:
+                        matched_target = target_key
+                        source_group = data["source_group"]
+                        del PENDING_REQUESTS[target_key]
                         
             if matched_target and source_group:
                 print(f"🎯 [ปลายทาง B ({target_b_type}) ตอบกลับแล้ว!] พบข้อมูลตรงกับ Target: {matched_target}")
