@@ -38,6 +38,39 @@ if os.path.exists(CONFIG_FILE):
     except Exception:
         pass
 
+# -------------------------------------------------------------
+# ระบบ Proxy Gateway มุดการเชื่อมต่อ (แก้ปัญหา 403 Forbidden บน Cloud/Railway)
+# รองรับทั้ง LINE_PROXY, HTTPS_PROXY, HTTP_PROXY (http, https, socks5)
+# -------------------------------------------------------------
+PROXY_URL = (os.getenv("LINE_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or saved_cfg.get("proxy_url", "")).strip()
+if PROXY_URL:
+    os.environ["HTTP_PROXY"] = PROXY_URL
+    os.environ["HTTPS_PROXY"] = PROXY_URL
+    os.environ["http_proxy"] = PROXY_URL
+    os.environ["https_proxy"] = PROXY_URL
+    os.environ["ALL_PROXY"] = PROXY_URL
+    
+    try:
+        import requests
+        _orig_req_init = requests.Session.__init__
+        def _patched_req_init(self, *args, **kwargs):
+            _orig_req_init(self, *args, **kwargs)
+            self.proxies = {"http": PROXY_URL, "https": PROXY_URL}
+        requests.Session.__init__ = _patched_req_init
+        
+        import httpx
+        _orig_httpx_init = httpx.Client.__init__
+        def _patched_httpx_init(self, *args, **kwargs):
+            if "proxy" not in kwargs and "proxies" not in kwargs:
+                kwargs["proxy"] = PROXY_URL
+            return _orig_httpx_init(self, *args, **kwargs)
+        httpx.Client.__init__ = _patched_httpx_init
+        
+        clean_proxy = PROXY_URL.split("@")[-1] if "@" in PROXY_URL else PROXY_URL.split("://")[-1]
+        print(f"🛡️ เปิดใช้งาน Proxy เพื่อเลี่ยง 403 LEGY: {clean_proxy}")
+    except Exception as e:
+        print(f"⚠️ ตั้งค่า Proxy Interceptor: {e}")
+
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "0.15"))  # ความถี่ในการตรวจสอบข้อความ (วินาที)
 PORT = int(os.getenv("PORT", "0"))  # สำหรับ Railway Health Check
 # ========================================================
