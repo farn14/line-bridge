@@ -152,18 +152,18 @@ nohup python 2_run_bridge.py > bot.log 2>&1 &
 ```json
 {
   "auth_token": "eyJ0eXAiOiJKV1QiLCJhbGciOi...",
-  "mid": "u2d5f38558636bb6efd8a3e261fbed8ab",
-  "display_name": "⚡ N Λ K Λ ⚡",
+  "mid": "u0123456789abcdef0123456789abcdef",
+  "display_name": "ชื่อผู้ใช้ LINE",
   "e2ee_keys": {
-    "keyId": "6058564",
-    "privKey": "IOHoEyYrfllDGb4HBMbwTa/7PRUFIhNYuf95oPaqM1Y=",
-    "pubKey": "UNbb6ItHPpfToCzhV7G0VeMLeLFSz0vlFT9lys4fJ1Q=",
+    "keyId": "1234567",
+    "privKey": "...",
+    "pubKey": "...",
     "e2eeVersion": "1"
   },
-  "group_a_id": "c0f27c475ee99512b0a59a8cc43954e6a",
-  "group_a_name": "ไส้เดือนน้อย(7)",
-  "group_b_id": "c09377948af79c412e5647453fc60ca2d",
-  "group_b_name": "Robot-10",
+  "group_a_id": "c0123456789abcdef0123456789abcdef",
+  "group_a_name": "กลุ่มต้นทาง (A)",
+  "group_b_id": "c9876543210fedcba9876543210fedcba",
+  "group_b_name": "กลุ่มปลายทาง (B)",
   "group_b_type": "GROUP",
   "timeout_seconds": 90
 }

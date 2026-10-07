@@ -38,9 +38,9 @@
 
 | Variable Name | Value | หมายเหตุ |
 | :--- | :--- | :--- |
-| `AUTH_TOKEN` | `eyJ0eXAiOiJKV1QiLC...` | ใช้ Token ปัจจุบันที่ได้จากการสแกน |
-| `GROUP_A_ID` | `ca64a75009f7db17537dede906b49beed` | กลุ่ม A |
-| `GROUP_B_ID` | `cecf0ffbb255456787662d7190a24b160` | กลุ่ม B |
+| `AUTH_TOKEN` | `eyJ0eXAiOiJKV1QiLC...` | ใช้ Token ปัจจุบันที่ได้จากการสแกน (คัดลอกจาก config.json) |
+| `GROUP_A_ID` | `c0123456789abcdef0123456789abcdef` | ID กลุ่มต้นทาง A (คัดลอกจาก config.json) |
+| `GROUP_B_ID` | `c9876543210fedcba9876543210fedcba` | ID กลุ่ม/บอทปลายทาง B (คัดลอกจาก config.json) |
 | `TIMEOUT_SECONDS` | `90` | ตั้งเวลารอผลลัพธ์ 90 วินาที (1.30 นาที) |
 
 > 💡 **หมายเหตุเรื่อง Healthcheck**:

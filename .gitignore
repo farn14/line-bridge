@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 .env
+config.json
 session.json
 .images/
 .e2eeKeys/
 session_data/
+save_key.py
+*.zip

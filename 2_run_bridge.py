@@ -23,15 +23,11 @@ except ImportError:
 from CHRLINE import CHRLINE
 
 # ========================================================
-# ⚙️ ข้อมูลการเชื่อมต่อระบบ (ดึงจาก Env ก่อน หรือใช้ค่า Default)
+# ⚙️ ข้อมูลการเชื่อมต่อระบบ (ดึงจาก Env ก่อน หรือโหลดจาก config.json)
 # ========================================================
-AUTH_TOKEN = os.getenv(
-    "AUTH_TOKEN",
-    "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiI5ZDlhYTljYS1hMmVlLTRlZDktYjRmOC0wMTM1MzJhMWY0MmMiLCJhdWQiOiJMSU5FIiwiaWF0IjoxNzkxMzYyNTAzLCJleHAiOjE3OTE5NjczMDMsInNjcCI6IkxJTkVfQ09SRSIsInJ0aWQiOiI4ZWYzZmM4Ny0wYmNkLTRjNmItYTg1NS01YThjYzU0Mjk1YjkiLCJyZXhwIjoxODIyODk4NTAzLCJ2ZXIiOiIzLjAiLCJhaWQiOiJ1MmQ1ZjM4NTU4NjM2YmI2ZWZkOGEzZTI2MWZiZWQ4YWIiLCJsc2lkIjoiNGU0ZDFmODYtMmMxZC00Y2RhLWEyYmEtMTJjZTBhODNiYjA5IiwiZGlkIjoiTk9ORSIsImN0eXBlIjoiREVTS1RPUF9XSU4iLCJjbW9kZSI6IlNFQ09OREFSWSIsImNpZCI6IjAxMDAwMDAwMDAifQ.OUr_dfAteyhP_AsYeRqgVeOxmnElV4nfGj2WAyNWBRY"
-)
-
-GROUP_A_ID = os.getenv("GROUP_A_ID", "ca64a75009f7db17537dede906b49beed")  # กลุ่มA
-GROUP_B_ID = os.getenv("GROUP_B_ID", "cecf0ffbb255456787662d7190a24b160")  # กลุ่มB
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "").strip()
+GROUP_A_ID = os.getenv("GROUP_A_ID", "").strip()
+GROUP_B_ID = os.getenv("GROUP_B_ID", "").strip()
 TIMEOUT_SECONDS = int(os.getenv("TIMEOUT_SECONDS", "90"))  # 1.30 นาที (90 วินาที)
 
 # โหลดค่าจาก config.json (ถ้ามี)
@@ -42,12 +38,27 @@ if os.path.exists(CONFIG_FILE):
         import json
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             saved_cfg = json.load(f)
-            AUTH_TOKEN = os.getenv("AUTH_TOKEN", saved_cfg.get("auth_token", AUTH_TOKEN))
-            GROUP_A_ID = os.getenv("GROUP_A_ID", saved_cfg.get("group_a_id", GROUP_A_ID))
-            GROUP_B_ID = os.getenv("GROUP_B_ID", saved_cfg.get("group_b_id", GROUP_B_ID))
-            TIMEOUT_SECONDS = int(os.getenv("TIMEOUT_SECONDS", str(saved_cfg.get("timeout_seconds", TIMEOUT_SECONDS))))
-    except Exception:
-        pass
+            if not AUTH_TOKEN:
+                AUTH_TOKEN = str(saved_cfg.get("auth_token", "")).strip()
+            if not GROUP_A_ID:
+                GROUP_A_ID = str(saved_cfg.get("group_a_id", "")).strip()
+            if not GROUP_B_ID:
+                GROUP_B_ID = str(saved_cfg.get("group_b_id", "")).strip()
+            if "timeout_seconds" in saved_cfg and not os.getenv("TIMEOUT_SECONDS"):
+                TIMEOUT_SECONDS = int(saved_cfg.get("timeout_seconds", 90))
+    except Exception as e:
+        print(f"⚠️ เกิดข้อผิดพลาดในการอ่าน config.json: {e}")
+
+if not AUTH_TOKEN or not GROUP_A_ID or not GROUP_B_ID:
+    print("=" * 65)
+    print("⚠️ ยังไม่ได้เข้าสู่ระบบหรือตั้งค่ากลุ่ม LINE สำหรับ Bridge")
+    print("=" * 65)
+    print("ไม่พบ Token หรือ ID กลุ่ม LINE ต้นทาง/ปลายทางใน config.json")
+    print("\n👉 วิธีเริ่มใช้งาน:")
+    print("1. รันไฟล์ '1_LOGIN.bat' เพื่อสแกน QR Code และเลือกกลุ่มที่ต้องการเชื่อมต่อ")
+    print("2. ระบบจะสร้างไฟล์ config.json ให้อัตโนมัติ จากนั้นรัน '2_RUN_BRIDGE.bat' ได้ทันที")
+    print("=" * 65)
+    sys.exit(1)
 
 # -------------------------------------------------------------
 # ระบบ Proxy Gateway มุดการเชื่อมต่อ (แก้ปัญหา 403 Forbidden บน Cloud/Railway)
@@ -119,7 +130,7 @@ if PORT > 0:
 try:
     cl = CHRLINE(authTokenOrEmail=AUTH_TOKEN, device="DESKTOPWIN", version="9.2.0.3421")
     my_profile = cl.getProfile()
-    my_mid = cl.checkAndGetValue(my_profile, 1, 'mid') or getattr(cl, 'mid', '') or 'u2d5f38558636bb6efd8a3e261fbed8ab'
+    my_mid = cl.checkAndGetValue(my_profile, 1, 'mid') or getattr(cl, 'mid', '') or ''
     my_name = cl.checkAndGetValue(my_profile, 20, 'displayName') or 'ผู้ใช้ LINE'
     
     # ฝัง E2EE Key อัตโนมัติ (Portable: รองรับทั้งบัญชีใหม่, Windows, และ Railway/Docker)
@@ -127,15 +138,11 @@ try:
         from base64 import b64decode
         e2ee_cfg = saved_cfg.get("e2ee_keys", {})
         if e2ee_cfg and "privKey" in e2ee_cfg and "pubKey" in e2ee_cfg:
-            k_id = e2ee_cfg.get("keyId", 6058564)
-            k_ver = e2ee_cfg.get("e2eeVersion", 1)
+            k_id = int(e2ee_cfg.get("keyId", 0))
+            k_ver = int(e2ee_cfg.get("e2eeVersion", 1))
             priv_k = b64decode(e2ee_cfg["privKey"])
             pub_k = b64decode(e2ee_cfg["pubKey"])
             cl.saveE2EESelfKeyData(my_mid, pub_k, priv_k, k_id, k_ver)
-        else:
-            PRIV_KEY = b' \xe1\xe8\x13&+~YC\x19\xbe\x07\x04\xc6\xf0M\xaf\xfb=\x15\x05"\x13X\xb9\xffy\xa0\xf6\xaa3V'
-            PUB_KEY = b"P\xd6\xdb\xe8\x8bG>\x97\xd3\xa0,\xe1W\xb1\xb4U\xe3\x0bx\xb1R\xcfK\xe5\x15?e\xca\xce\x1f'T"
-            cl.saveE2EESelfKeyData(my_mid, PUB_KEY, PRIV_KEY, 6058564, 1)
     except Exception as e:
         pass
 

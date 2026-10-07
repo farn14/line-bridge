@@ -1,0 +1,18 @@
+{
+  "auth_token": "YOUR_LINE_AUTH_TOKEN_HERE",
+  "mid": "u0123456789abcdef0123456789abcdef",
+  "display_name": "ชื่อผู้ใช้ LINE",
+  "e2ee_keys": {
+    "keyId": "1234567",
+    "privKey": "",
+    "pubKey": "",
+    "e2eeVersion": "1"
+  },
+  "group_a_id": "c0123456789abcdef0123456789abcdef",
+  "group_a_name": "กลุ่มต้นทาง (A)",
+  "group_b_id": "c9876543210fedcba9876543210fedcba",
+  "group_b_name": "กลุ่มปลายทาง (B)",
+  "group_b_type": "GROUP",
+  "timeout_seconds": 90,
+  "proxy_url": ""
+}

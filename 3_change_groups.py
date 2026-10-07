@@ -12,17 +12,27 @@ import json
 from CHRLINE import CHRLINE
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
-DEFAULT_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiI5ZDlhYTljYS1hMmVlLTRlZDktYjRmOC0wMTM1MzJhMWY0MmMiLCJhdWQiOiJMSU5FIiwiaWF0IjoxNzkxMzYyNTAzLCJleHAiOjE3OTE5NjczMDMsInNjcCI6IkxJTkVfQ09SRSIsInJ0aWQiOiI4ZWYzZmM4Ny0wYmNkLTRjNmItYTg1NS01YThjYzU0Mjk1YjkiLCJyZXhwIjoxODIyODk4NTAzLCJ2ZXIiOiIzLjAiLCJhaWQiOiJ1MmQ1ZjM4NTU4NjM2YmI2ZWZkOGEzZTI2MWZiZWQ4YWIiLCJsc2lkIjoiNGU0ZDFmODYtMmMxZC00Y2RhLWEyYmEtMTJjZTBhODNiYjA5IiwiZGlkIjoiTk9ORSIsImN0eXBlIjoiREVTS1RPUF9XSU4iLCJjbW9kZSI6IlNFQ09OREFSWSIsImNpZCI6IjAxMDAwMDAwMDAifQ.OUr_dfAteyhP_AsYeRqgVeOxmnElV4nfGj2WAyNWBRY'
+saved_token = os.getenv("AUTH_TOKEN", "").strip()
 
 # อ่าน Token จาก config.json ถ้ามี
-saved_token = DEFAULT_TOKEN
 if os.path.exists(CONFIG_FILE):
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             c = json.load(f)
-            saved_token = c.get("auth_token", DEFAULT_TOKEN)
+            if not saved_token:
+                saved_token = c.get("auth_token", "").strip()
     except Exception:
         pass
+
+if not saved_token:
+    print("=" * 68)
+    print("⚠️ ไม่พบ Token การเข้าสู่ระบบ LINE สำหรับบัญชีคน A")
+    print("=" * 68)
+    print("ไม่พบ Token ใน config.json หรือ Environment Variable AUTH_TOKEN")
+    print("\n👉 กรุณารันไฟล์ '1_LOGIN.bat' เพื่อสแกน QR Code เข้าสู่ระบบก่อนใช้งาน")
+    print("=" * 68)
+    input("\nกด Enter เพื่อปิดหน้าต่างนี้...")
+    sys.exit(1)
 
 print("=" * 68)
 print("🔍 กำลังดึงรายชื่อกลุ่ม LINE และ LINE OA จากบัญชีคน A...")
