@@ -8,7 +8,6 @@ xxhash>=3.0.0
 rsa>=4.9
 httpx>=0.24.0
 h2>=4.0.0
-gevent>=22.0.0
 six>=1.16.0
 PySocks>=1.7.1
 socksio>=1.0.0

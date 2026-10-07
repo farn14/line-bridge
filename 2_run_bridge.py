@@ -9,6 +9,17 @@ import sys
 import re
 import time
 import threading
+try:
+    import gevent.monkey
+except ImportError:
+    import types
+    _g = types.ModuleType("gevent")
+    _m = types.ModuleType("gevent.monkey")
+    _m.patch_all = lambda *a, **k: None
+    _g.monkey = _m
+    _g.sleep = time.sleep
+    sys.modules["gevent"] = _g
+    sys.modules["gevent.monkey"] = _m
 from CHRLINE import CHRLINE
 
 # ========================================================
