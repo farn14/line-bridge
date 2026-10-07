@@ -118,8 +118,8 @@ try:
         print("  (ไม่พบเพื่อนหรือ LINE OA)")
     print("-" * 65)
 
-    sel_a = {"id": "c0f27c475ee99512b0a59a8cc43954e6a", "name": "กลุ่มA", "type": "GROUP"}
-    sel_b = {"id": "c09377948af79c412e5647453fc60ca2d", "name": "กลุ่มB", "type": "GROUP"}
+    sel_a = None
+    sel_b = None
 
     if all_destinations:
         print("\n👉 กรุณาเลือกต้นทางและปลายทาง:")
@@ -154,6 +154,12 @@ try:
                 break
             else:
                 print("⚠️ กรุณาระบุเป็นหมายเลขในรายการ หรือ MID ที่ขึ้นต้นด้วย u หรือ c ครับ")
+    else:
+        print("\n⚠️ ไม่พบกลุ่มหรือผู้ติดต่อในบัญชี LINE")
+        val_a = input("กรุณาระบุ MID กลุ่มต้นทาง A (ขึ้นต้นด้วย c...): ").strip()
+        val_b = input("กรุณาระบุ MID ปลายทาง B (ขึ้นต้นด้วย c... หรือ u...): ").strip()
+        sel_a = {"id": val_a, "name": "กลุ่มต้นทาง A", "type": "GROUP"}
+        sel_b = {"id": val_b, "name": "ปลายทาง B", "type": "OA/USER" if val_b.startswith("u") else "GROUP"}
 
     # บันทึกทุกอย่างลง config.json อัตโนมัติ
     new_config = {
