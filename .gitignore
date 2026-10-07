@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+session.json
+.images/
+.e2eeKeys/

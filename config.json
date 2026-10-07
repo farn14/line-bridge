@@ -1,0 +1,16 @@
+{
+  "auth_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJmMTUwNWMxOC04YjAxLTRhOWUtOTE3Mi00MGZiOWQ3NzA2ZDIiLCJhdWQiOiJMSU5FIiwiaWF0IjoxNzkxMzgxMjI2LCJleHAiOjE3OTE5ODYwMjYsInNjcCI6IkxJTkVfQ09SRSIsInJ0aWQiOiIzYjc0MWYyMy00MjJiLTQ1M2UtYjFiNy0wMTY2NjNiZmQ5M2QiLCJyZXhwIjoxODIyOTE3MjI2LCJ2ZXIiOiIzLjAiLCJhaWQiOiJ1NmI2MTNmN2NkYjAyNGM4YzQwMGQwM2U3ZDFkYWExODciLCJsc2lkIjoiNGFiYjQxZGYtZmYwZS00NWNlLWFkNGQtYjIyYTJhZDUxYjMyIiwiZGlkIjoiTk9ORSIsImN0eXBlIjoiREVTS1RPUF9XSU4iLCJjbW9kZSI6IlNFQ09OREFSWSIsImNpZCI6IjAxMDAwMDAwMDAifQ.CakBS-G5v6fkOWq4oiaBJVr6jcTtqsuoZSPDFNDVGWw",
+  "mid": "u6b613f7cdb024c8c400d03e7d1daa187",
+  "display_name": "PW_Naaf(นาฟ)",
+  "e2ee_keys": {
+    "keyId": "6055667",
+    "privKey": "+BT5q5WZ4lRqcxZCwUFEkPG4VkEQ0wWLFaZtCsbVT1k=",
+    "pubKey": "Jc5mdfGNu7QJjP6EAwRT1U1O95W07GSt7H3sqweOu3s=",
+    "e2eeVersion": "1"
+  },
+  "group_a_id": "c0f27c475ee99512b0a59a8cc43954e6a",
+  "group_a_name": "ไส้เดือนน้อย(7)",
+  "group_b_id": "c09377948af79c412e5647453fc60ca2d",
+  "group_b_name": "Robot-10",
+  "timeout_seconds": 90
+}
