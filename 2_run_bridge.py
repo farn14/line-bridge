@@ -9,6 +9,7 @@ import sys
 import re
 import time
 import threading
+import collections
 try:
     import gevent.monkey
 except ImportError:
@@ -97,10 +98,25 @@ POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "0.15"))  # ความถี�
 PORT = int(os.getenv("PORT", "0"))  # สำหรับ Railway Health Check
 # ========================================================
 
+class Deduplicator:
+    def __init__(self, maxlen=1000):
+        self.q = collections.deque(maxlen=maxlen)
+        self.s = set()
+    def add(self, item):
+        if item in self.s:
+            return False
+        if len(self.q) == self.q.maxlen:
+            self.s.discard(self.q.popleft())
+        self.q.append(item)
+        self.s.add(item)
+        return True
+    def __contains__(self, item):
+        return item in self.s
+
 PENDING_REQUESTS = {}
 BOT_REPLIES_SENT = set()
-SEEN_A = set()
-SEEN_B = set()
+SEEN_A = Deduplicator()
+SEEN_B = Deduplicator()
 LOCK = threading.Lock()
 
 print("=" * 65)
@@ -187,10 +203,10 @@ def send_msg(to_mid, text):
 
 # เริ่มต้นจดจำ Message ID เก่าในทั้งสองกลุ่ม เพื่อไม่ให้ยิงข้อความเก่าซ้ำ
 try:
-    for m in cl.getRecentMessagesV2(GROUP_A_ID, 10) or []:
+    for m in cl.getRecentMessagesV2(GROUP_A_ID, 15) or []:
         if m.get(4):
             SEEN_A.add(m.get(4))
-    for m in cl.getRecentMessagesV2(GROUP_B_ID, 10) or []:
+    for m in cl.getRecentMessagesV2(GROUP_B_ID, 15) or []:
         if m.get(4):
             SEEN_B.add(m.get(4))
     print(f"📦 โหลดประวัติข้อความเดิมเรียบร้อย (พร้อมตรวจจับข้อความใหม่ทันที)")
@@ -222,7 +238,7 @@ def extract_target_key(text):
     - เลขประจำตัวประชาชน 13 หลัก (เช่น 1234567812324 หรือ 1-2345-67812-32-4)
     - เบอร์โทรศัพท์ 9-10 หลัก (เช่น 0821519172, 021234567)
     - เลขบัญชี / หมายเลขอ้างอิง 6-18 หลัก
-    - หรือพารามิเตอร์ที่ตามหลังเครื่องหมาย #, $, %
+    - หรือพารามิเตอร์ที่ตามหลังเครื่องหมาย #, $, % (รองรับภาษาไทย)
     """
     # 1. ค้นหาตัวเลขต่อเนื่องความยาว 6 ถึง 18 หลัก
     m = re.search(r'\d{6,18}', text)
@@ -234,8 +250,8 @@ def extract_target_key(text):
     if 6 <= len(digits) <= 18:
         return digits
         
-    # 3. สกัดพารามิเตอร์ที่อยู่ติดหรือตามหลัง #, $, %
-    p = re.search(r'[#\$%]\s*([a-zA-Z0-9\-_]+)', text)
+    # 3. สกัดพารามิเตอร์ที่อยู่ติดหรือตามหลัง #, $, % (แก้ไขรองรับภาษาไทย)
+    p = re.search(r'[#\$%]\s*([^\s]+)', text)
     if p:
         return p.group(1)
         
@@ -246,7 +262,7 @@ while True:
         # ====================================================
         # 1. ตรวจสอบ "กลุ่ม A" (ข้อความคำสั่งจากผู้ใช้หรือตัวเอง)
         # ====================================================
-        recent_a = cl.getRecentMessagesV2(GROUP_A_ID, 5) or []
+        recent_a = cl.getRecentMessagesV2(GROUP_A_ID, 15) or []
         new_msgs_a = [m for m in recent_a if m.get(4) and m.get(4) not in SEEN_A]
         
         # จัดเรียงจากเก่าไปใหม่ เพื่อส่งตามลำดับที่พิมพ์จริง
@@ -255,8 +271,6 @@ while True:
             msg_id = msg.get(4)
             sender = msg.get(1) or ""
             SEEN_A.add(msg_id)
-            if len(SEEN_A) > 1000:
-                SEEN_A.pop()
                 
             text = extract_text(msg).strip()
             if not text:
@@ -299,7 +313,7 @@ while True:
         # ====================================================
         # 2. ตรวจสอบ "ปลายทาง B" (คำตอบจากบอท Master หรือ LINE OA)
         # ====================================================
-        recent_b = cl.getRecentMessagesV2(GROUP_B_ID, 5) or []
+        recent_b = cl.getRecentMessagesV2(GROUP_B_ID, 15) or []
         new_msgs_b = [m for m in recent_b if m.get(4) and m.get(4) not in SEEN_B]
         
         new_msgs_b.reverse()
@@ -307,8 +321,6 @@ while True:
             msg_id = msg.get(4)
             sender = msg.get(1) or ""
             SEEN_B.add(msg_id)
-            if len(SEEN_B) > 1000:
-                SEEN_B.pop()
                 
             # ถ้าเป็นข้อความที่ตัวเองส่งไปในปลายทาง B ให้ข้าม
             if sender == my_mid:
@@ -369,4 +381,5 @@ while True:
         print("\n🛑 หยุดการทำงานระบบ Personal LINE Bridge เรียบร้อยแล้ว")
         break
     except Exception as e:
+        print(f"❌ พบข้อผิดพลาดในลูปหลัก: {e}")
         time.sleep(1)
