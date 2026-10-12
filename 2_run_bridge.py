@@ -115,6 +115,7 @@ class Deduplicator:
 
 PENDING_REQUESTS = {}
 BOT_REPLIES_SENT = set()
+HUMAN_SENDERS_B = set()  # บันทึก MID ของผู้ใช้ทั่วไปในกลุ่ม B เพื่อแยกแยะไม่ให้สับสนกับบอท
 SEEN_A = Deduplicator()
 SEEN_B = Deduplicator()
 LOCK = threading.Lock()
@@ -329,6 +330,18 @@ while True:
             text = extract_text(msg).strip()
             if not text:
                 continue
+
+            # 🛡️ [ป้องกันบั๊กคำสั่งคนอื่นในกลุ่ม B เด้งเข้ากลุ่ม A]
+            # 1. ถ้าข้อความขึ้นต้นด้วยสัญลักษณ์คำสั่ง (#, $, %, /) ย่อมเป็นคำสั่งที่คนอื่นพิมพ์หาบอท ไม่ใช่คำตอบจากบอท
+            if any(text.startswith(sym) for sym in ['#', '$', '%', '/']):
+                if sender:
+                    HUMAN_SENDERS_B.add(sender)
+                print(f"ℹ️ [ข้ามคำสั่งของผู้ใช้อื่นในปลายทาง B]: จาก {sender}: '{text[:60]}'")
+                continue
+
+            # 2. ถ้าผู้ส่งนี้เคยพิมพ์คำสั่งมาก่อน แสดงว่าเป็นสมาชิกทั่วไปในกลุ่ม B (ไม่ใช่บอท) ให้ข้ามข้อความแชทคุยเล่น
+            if sender in HUMAN_SENDERS_B:
+                continue
                 
             print(f"🔔 [ข้อความใหม่ในปลายทาง B ({target_b_type})] จาก {sender}: '{text[:60]}...'")
             
@@ -348,10 +361,12 @@ while True:
                 # 2. กรณีคำสั่งกลุ่มช่วยเหลือ/เมนูคำสั่ง (help, menu, วิธีใช้, คำสั่ง, คู่มือ)
                 if not matched_target:
                     help_keys = ['help', 'menu', 'วิธีใช้', 'คำสั่ง', 'คู่มือ', 'เช็ค']
-                    is_help_reply = any(hk in text.lower() for hk in ['การใช้งาน', 'วิธีใช้', 'คำสั่ง', 'เช็ค', 'help'])
+                    is_help_reply = any(hk in text.lower() for hk in ['การใช้งาน', 'วิธีใช้', 'คำสั่ง', 'เมนู', 'help'])
                     for target_key, data in list(PENDING_REQUESTS.items()):
                         cmd_txt = data.get("cmd", "").lower()
-                        if target_key.lower() in help_keys or any(hk in cmd_txt for hk in help_keys) or is_help_reply:
+                        is_help_cmd = target_key.lower() in help_keys or any(hk in cmd_txt for hk in help_keys)
+                        # ต้องตรงกันทั้งคำสั่งต้นทางที่เป็น help และข้อความตอบกลับที่เป็นเนื้อหาช่วยเหลือ
+                        if is_help_cmd and is_help_reply:
                             matched_target = target_key
                             source_group = data["source_group"]
                             del PENDING_REQUESTS[target_key]
@@ -370,7 +385,9 @@ while True:
                 print(f"🎯 [ปลายทาง B ({target_b_type}) ตอบกลับแล้ว!] พบข้อมูลตรงกับ Target: {matched_target}")
                 try:
                     BOT_REPLIES_SENT.add(text)
-                    send_msg(source_group, text)
+                    sent_res = send_msg(source_group, text)
+                    if isinstance(sent_res, dict) and sent_res.get(4):
+                        SEEN_A.add(sent_res.get(4))
                     print(f"🚀 [ดีดผลลัพธ์กลับกลุ่ม A สำเร็จเรียบร้อย!]")
                 except Exception as e:
                     print(f"❌ ส่งกลับกลุ่ม A ล้มเหลว: {e}")
