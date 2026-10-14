@@ -8,3 +8,4 @@ session.json
 session_data/
 save_key.py
 *.zip
+.archify/

@@ -102,22 +102,26 @@ class Deduplicator:
     def __init__(self, maxlen=1000):
         self.q = collections.deque(maxlen=maxlen)
         self.s = set()
+        self._lock = threading.Lock()
     def add(self, item):
-        if item in self.s:
-            return False
-        if len(self.q) == self.q.maxlen:
-            self.s.discard(self.q.popleft())
-        self.q.append(item)
-        self.s.add(item)
-        return True
+        with self._lock:
+            if item in self.s:
+                return False
+            if len(self.q) == self.q.maxlen:
+                self.s.discard(self.q.popleft())
+            self.q.append(item)
+            self.s.add(item)
+            return True
     def __contains__(self, item):
-        return item in self.s
+        with self._lock:
+            return item in self.s
 
 PENDING_REQUESTS = {}
 BOT_REPLIES_SENT = set()
 HUMAN_SENDERS_B = set()  # บันทึก MID ของผู้ใช้ทั่วไปในกลุ่ม B เพื่อแยกแยะไม่ให้สับสนกับบอท
 SEEN_A = Deduplicator()
 SEEN_B = Deduplicator()
+SEEN_PRIVATE = Deduplicator()
 LOCK = threading.Lock()
 
 print("=" * 65)
@@ -176,16 +180,20 @@ except Exception as e:
     sys.exit(1)
 
 def extract_text(msg):
-    """ถอดรหัสข้อความรองรับทั้ง Plain Text, LINE OA และ E2EE (Letter Sealing)"""
+    """ถอดรหัสข้อความรองรับทั้ง Plain Text, LINE OA และ E2EE (Letter Sealing) ทั้งในกลุ่มและแชทส่วนตัว 1:1"""
     text = msg.get(10) or ''
     meta = msg.get(18) or {}
-    if not text and isinstance(meta, dict):
-        if 'e2eeVersion' in meta:
+    if not text:
+        if (isinstance(meta, dict) and 'e2eeVersion' in meta) or msg.get(20):
+            is_self = (msg.get(1) == my_mid)
             try:
-                text = cl.decryptE2EETextMessage(msg)
+                text = cl.decryptE2EETextMessage(msg, isSelf=is_self)
             except Exception:
-                pass
-        elif 'text' in meta:
+                try:
+                    text = cl.decryptE2EETextMessage(msg, isSelf=not is_self)
+                except Exception:
+                    pass
+        elif isinstance(meta, dict) and 'text' in meta:
             text = meta.get('text', '')
     return text or ''
 
@@ -258,6 +266,99 @@ def extract_target_key(text):
         
     return None
 
+def private_msg_loop():
+    """เธรดดักฟังข้อความแชทส่วนตัว 1:1 Direct Message แบบ Real-time ผ่าน LINE Push Ops"""
+    print("👂 เปิดเธรดดักฟังแชทส่วนตัว (1:1 Direct Message) แบบ Real-time...")
+    try:
+        if not hasattr(cl, 'revision') or not cl.revision:
+            cl.revision = cl.getLastOpRevision()
+        print(f"📡 [Private Listener] เริ่มต้นดักฟังที่ Op Revision: {cl.revision}")
+    except Exception as e:
+        print(f"⚠️ [Private Listener] ดึง Op Revision เริ่มต้นล้มเหลว: {e}")
+        cl.revision = 0
+
+    while True:
+        try:
+            ops = cl.fetchOps(cl.revision, count=50)
+            if not ops:
+                time.sleep(0.3)
+                continue
+                
+            for op in ops:
+                op_type = cl.checkAndGetValue(op, 'type', 3) or op.get(3)
+                op_rev = cl.checkAndGetValue(op, 'revision', 1) or op.get(1)
+                if op_rev:
+                    cl.setRevision(op_rev)
+                    
+                # สนใจเฉพาะข้อความเข้า 26 (RECEIVE_MESSAGE) หรือที่เราส่งเอง 25 (SEND_MESSAGE)
+                if op_type not in (25, 26):
+                    continue
+                    
+                msg = cl.checkAndGetValue(op, 'message', 20) or op.get(20) or {}
+                if not msg:
+                    continue
+                    
+                msg_id = msg.get(4)
+                if not msg_id or msg_id in SEEN_PRIVATE:
+                    continue
+                SEEN_PRIVATE.add(msg_id)
+                
+                # ตรวจสอบว่าเป็นแชทส่วนตัว 1:1 หรือไม่ (toType == 0 หรือไม่ใช่กลุ่ม c...)
+                to_type = cl.checkAndGetValue(msg, 'toType', 3) or msg.get(3)
+                to_mid = msg.get(2) or ""
+                sender = msg.get(1) or ""
+                
+                # หากเป็นกลุ่ม ให้ข้ามเพราะมีลูปหลัก getRecentMessagesV2 ดูแลอยู่แล้ว
+                if to_type == 2 or str(to_mid).startswith('c'):
+                    continue
+                    
+                # คำนวณเป้าหมายสำหรับตอบกลับ (ถ้าเพื่อนทักมา reply_target คือเพื่อน, ถ้าเราพิมพ์เองในห้องแชทตัวเอง reply_target คือ to_mid)
+                reply_target = sender if sender != my_mid else to_mid
+                if not reply_target or not str(reply_target).startswith('u'):
+                    continue
+                    
+                text = extract_text(msg).strip()
+                if not text:
+                    continue
+                    
+                # ข้ามข้อความที่บอทเพิ่งตอบกลับไป
+                with LOCK:
+                    if text in BOT_REPLIES_SENT:
+                        BOT_REPLIES_SENT.discard(text)
+                        continue
+                    
+                print(f"🔔 [ข้อความใหม่ในแชทส่วนตัว 1:1] จาก {sender}: '{text}'")
+                
+                # กรองคำสั่ง: ต้องมีสัญลักษณ์ # หรือ $ หรือ %
+                TRIGGER_SYMBOLS = ['#', '$', '%']
+                if not any(sym in text for sym in TRIGGER_SYMBOLS):
+                    continue
+                    
+                target_key = extract_target_key(text)
+                if target_key:
+                    print(f"📥 [ตรวจพบคำสั่ง 1:1 ส่วนตัว ({', '.join(TRIGGER_SYMBOLS)})] '{text}' | Target Key: {target_key}")
+                    
+                    with LOCK:
+                        PENDING_REQUESTS[target_key] = {
+                            "source_group": reply_target,
+                            "timestamp": time.time(),
+                            "cmd": text
+                        }
+                        
+                    # ดีดคำสั่งเข้าปลายทาง B ทันที
+                    try:
+                        send_msg(GROUP_B_ID, text)
+                        print(f"⚡ [ยิงจากแชทส่วนตัว -> ปลายทาง B ({target_b_type}) สำเร็จ]: '{text}'")
+                    except Exception as e:
+                        print(f"❌ ยิงเข้าปลายทาง B ล้มเหลว: {e}")
+                else:
+                    print(f"ℹ️ [แชทส่วนตัว] มีสัญลักษณ์คำสั่ง ({', '.join(TRIGGER_SYMBOLS)}) แต่ไม่พบหมายเลขหรือพารามิเตอร์: '{text}'")
+                    
+        except Exception as e:
+            time.sleep(1)
+
+threading.Thread(target=private_msg_loop, daemon=True).start()
+
 while True:
     try:
         # ====================================================
@@ -278,9 +379,10 @@ while True:
                 continue
                 
             # ข้ามข้อความที่บอทเราเพิ่งดีดกลับมาตอบในกลุ่ม A
-            if text in BOT_REPLIES_SENT:
-                BOT_REPLIES_SENT.discard(text)
-                continue
+            with LOCK:
+                if text in BOT_REPLIES_SENT:
+                    BOT_REPLIES_SENT.discard(text)
+                    continue
                 
             print(f"🔔 [ข้อความใหม่ในกลุ่ม A] '{text}'")
             
@@ -384,13 +486,19 @@ while True:
             if matched_target and source_group:
                 print(f"🎯 [ปลายทาง B ({target_b_type}) ตอบกลับแล้ว!] พบข้อมูลตรงกับ Target: {matched_target}")
                 try:
-                    BOT_REPLIES_SENT.add(text)
+                    with LOCK:
+                        BOT_REPLIES_SENT.add(text)
                     sent_res = send_msg(source_group, text)
                     if isinstance(sent_res, dict) and sent_res.get(4):
-                        SEEN_A.add(sent_res.get(4))
-                    print(f"🚀 [ดีดผลลัพธ์กลับกลุ่ม A สำเร็จเรียบร้อย!]")
+                        if str(source_group).startswith('u'):
+                            SEEN_PRIVATE.add(sent_res.get(4))
+                        else:
+                            SEEN_A.add(sent_res.get(4))
+                    dest_label = f"แชทส่วนตัว 1:1 ({source_group})" if str(source_group).startswith('u') else "กลุ่ม A"
+                    print(f"🚀 [ดีดผลลัพธ์กลับไปยัง{dest_label} สำเร็จเรียบร้อย!]")
                 except Exception as e:
-                    print(f"❌ ส่งกลับกลุ่ม A ล้มเหลว: {e}")
+                    dest_label = "แชทส่วนตัว 1:1" if str(source_group).startswith('u') else "กลุ่ม A"
+                    print(f"❌ ส่งกลับ{dest_label} ล้มเหลว: {e}")
 
         time.sleep(POLL_INTERVAL)
 
