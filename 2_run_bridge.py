@@ -112,32 +112,62 @@ class Deduplicator:
             self.q.append(item)
             self.s.add(item)
             return True
+    def discard(self, item):
+        with self._lock:
+            self.s.discard(item)
     def __contains__(self, item):
         with self._lock:
             return item in self.s
+    def __len__(self):
+        with self._lock:
+            return len(self.s)
 
 PENDING_REQUESTS = {}
-BOT_REPLIES_SENT = set()
-HUMAN_SENDERS_B = set()  # บันทึก MID ของผู้ใช้ทั่วไปในกลุ่ม B เพื่อแยกแยะไม่ให้สับสนกับบอท
-SEEN_A = Deduplicator()
-SEEN_B = Deduplicator()
-SEEN_PRIVATE = Deduplicator()
+BOT_REPLIES_SENT = Deduplicator(maxlen=2000)
+HUMAN_SENDERS_B = Deduplicator(maxlen=5000)  # บันทึก MID ของผู้ใช้ทั่วไปในกลุ่ม B เพื่อแยกแยะไม่ให้สับสนกับบอท (Bounded ป้องกัน Memory Leak)
+SEEN_A = Deduplicator(maxlen=1000)
+SEEN_B = Deduplicator(maxlen=1000)
+SEEN_PRIVATE = Deduplicator(maxlen=2000)
 LOCK = threading.Lock()
+START_TIME = time.time()
+METRICS = {
+    "routed_a_to_b": 0,
+    "routed_b_to_dest": 0,
+    "last_poll_ts": time.time(),
+    "consecutive_errors": 0
+}
 
 print("=" * 65)
 print("🌉 กำลังเริ่มระบบ Personal LINE Bridge (กลุ่ม A <---> กลุ่ม B)...")
 print(f"⏱️ ตั้งค่า Timeout ไว้ที่: {TIMEOUT_SECONDS} วินาที (1.30 นาที)")
 print("=" * 65)
 
-# เปิด Healthcheck Web Server ถ้ามี PORT (สำหรับ Railway)
+# เปิด Healthcheck Web Server ถ้ามี PORT (สำหรับ Railway / Live Metrics)
 if PORT > 0:
+    import json
     from http.server import HTTPServer, BaseHTTPRequestHandler
     class HealthHandler(BaseHTTPRequestHandler):
         def do_GET(self):
+            with LOCK:
+                pending_count = len(PENDING_REQUESTS)
+            uptime_sec = int(time.time() - START_TIME)
+            status_data = {
+                "status": "ok",
+                "service": "personal-line-bridge",
+                "uptime_seconds": uptime_sec,
+                "pending_queue_size": pending_count,
+                "routed_a_to_b": METRICS["routed_a_to_b"],
+                "routed_b_to_dest": METRICS["routed_b_to_dest"],
+                "seen_a_size": len(SEEN_A),
+                "seen_b_size": len(SEEN_B),
+                "seen_private_size": len(SEEN_PRIVATE)
+            }
+            body = json.dumps(status_data).encode("utf-8")
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(b'{"status":"ok","service":"personal-line-bridge","uptime":"active"}')
+            self.wfile.write(body)
         def log_message(self, format, *args):
             pass
 
@@ -348,6 +378,8 @@ def private_msg_loop():
                     # ดีดคำสั่งเข้าปลายทาง B ทันที
                     try:
                         send_msg(GROUP_B_ID, text)
+                        with LOCK:
+                            METRICS["routed_a_to_b"] += 1
                         print(f"⚡ [ยิงจากแชทส่วนตัว -> ปลายทาง B ({target_b_type}) สำเร็จ]: '{text}'")
                     except Exception as e:
                         print(f"❌ ยิงเข้าปลายทาง B ล้มเหลว: {e}")
@@ -355,7 +387,7 @@ def private_msg_loop():
                     print(f"ℹ️ [แชทส่วนตัว] มีสัญลักษณ์คำสั่ง ({', '.join(TRIGGER_SYMBOLS)}) แต่ไม่พบหมายเลขหรือพารามิเตอร์: '{text}'")
                     
         except Exception as e:
-            time.sleep(1)
+            time.sleep(1.5)
 
 threading.Thread(target=private_msg_loop, daemon=True).start()
 
@@ -407,6 +439,8 @@ while True:
                 # ดีดคำสั่งเข้าปลายทาง B ทันที
                 try:
                     send_msg(GROUP_B_ID, text)
+                    with LOCK:
+                        METRICS["routed_a_to_b"] += 1
                     print(f"⚡ [ยิงไปปลายทาง B ({target_b_type}) สำเร็จ]: '{text}'")
                 except Exception as e:
                     print(f"❌ ยิงเข้าปลายทาง B ล้มเหลว: {e}")
@@ -486,9 +520,10 @@ while True:
             if matched_target and source_group:
                 print(f"🎯 [ปลายทาง B ({target_b_type}) ตอบกลับแล้ว!] พบข้อมูลตรงกับ Target: {matched_target}")
                 try:
-                    with LOCK:
-                        BOT_REPLIES_SENT.add(text)
+                    BOT_REPLIES_SENT.add(text)
                     sent_res = send_msg(source_group, text)
+                    with LOCK:
+                        METRICS["routed_b_to_dest"] += 1
                     if isinstance(sent_res, dict) and sent_res.get(4):
                         if str(source_group).startswith('u'):
                             SEEN_PRIVATE.add(sent_res.get(4))
@@ -500,11 +535,16 @@ while True:
                     dest_label = "แชทส่วนตัว 1:1" if str(source_group).startswith('u') else "กลุ่ม A"
                     print(f"❌ ส่งกลับ{dest_label} ล้มเหลว: {e}")
 
+        # อัปเดตสถานะสำเร็จและรีเซ็ต consecutive_errors
+        METRICS["last_poll_ts"] = time.time()
+        METRICS["consecutive_errors"] = 0
         time.sleep(POLL_INTERVAL)
 
     except KeyboardInterrupt:
         print("\n🛑 หยุดการทำงานระบบ Personal LINE Bridge เรียบร้อยแล้ว")
         break
     except Exception as e:
-        print(f"❌ พบข้อผิดพลาดในลูปหลัก: {e}")
-        time.sleep(1)
+        METRICS["consecutive_errors"] += 1
+        err_wait = min(15.0, 1.0 * (1.5 ** (METRICS["consecutive_errors"] - 1)))
+        print(f"❌ พบข้อผิดพลาดในลูปหลัก (ครั้งที่ {METRICS['consecutive_errors']}): {e} [หน่วงเวลา {err_wait:.1f}s]")
+        time.sleep(err_wait)
