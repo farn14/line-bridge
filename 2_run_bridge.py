@@ -516,6 +516,7 @@ while True:
             
             matched_target = None
             source_group = None
+            req_ts = None
             clean_reply_digits = re.sub(r'\D', '', text)
 
             with LOCK:
@@ -524,6 +525,7 @@ while True:
                     if (target_key.lower() in text.lower()) or (target_key.isdigit() and len(target_key) >= 6 and target_key in clean_reply_digits):
                         matched_target = target_key
                         source_group = data["source_group"]
+                        req_ts = data.get("timestamp")
                         del PENDING_REQUESTS[target_key]
                         break
 
@@ -538,6 +540,7 @@ while True:
                         if is_help_cmd and is_help_reply:
                             matched_target = target_key
                             source_group = data["source_group"]
+                            req_ts = data.get("timestamp")
                             del PENDING_REQUESTS[target_key]
                             break
 
@@ -548,10 +551,12 @@ while True:
                     if time.time() - data.get("timestamp", 0) <= TIMEOUT_SECONDS:
                         matched_target = target_key
                         source_group = data["source_group"]
+                        req_ts = data.get("timestamp")
                         del PENDING_REQUESTS[target_key]
                         
             if matched_target and source_group:
-                print(f"🎯 [ปลายทาง B ({target_b_type}) ตอบกลับแล้ว!] พบข้อมูลตรงกับ Target: {matched_target}")
+                elapsed_time = round(time.time() - req_ts, 3) if req_ts else 0.0
+                print(f"🎯 [ปลายทาง B ({target_b_type}) ตอบกลับแล้ว!] พบข้อมูลตรงกับ Target: {matched_target} (ใช้เวลาไป: {elapsed_time:.3f} วินาที / {int(elapsed_time * 1000)} ms)")
                 try:
                     BOT_REPLIES_SENT.add(text)
                     sent_res = send_msg(source_group, text)
@@ -562,10 +567,10 @@ while True:
                             SEEN_PRIVATE.add(sent_res.get(4))
                         else:
                             SEEN_A.add(sent_res.get(4))
-                    dest_label = f"แชทส่วนตัว 1:1 ({source_group})" if str(source_group).startswith('u') else "กลุ่ม A"
-                    print(f"🚀 [ดีดผลลัพธ์กลับไปยัง{dest_label} สำเร็จเรียบร้อย!]")
+                    dest_label = f"แชทส่วนตัว 1:1 ({source_group})" if str(source_group).startswith('u') else f"กลุ่มต้นทาง ({source_group})"
+                    print(f"🚀 [ดีดผลลัพธ์กลับไปยัง{dest_label} สำเร็จเรียบร้อย! | ความเร็วไป-กลับ: {elapsed_time:.3f}s]")
                 except Exception as e:
-                    dest_label = "แชทส่วนตัว 1:1" if str(source_group).startswith('u') else "กลุ่ม A"
+                    dest_label = f"แชทส่วนตัว 1:1 ({source_group})" if str(source_group).startswith('u') else f"กลุ่มต้นทาง ({source_group})"
                     print(f"❌ ส่งกลับ{dest_label} ล้มเหลว: {e}")
 
         # อัปเดตสถานะสำเร็จและรีเซ็ต consecutive_errors
