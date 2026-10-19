@@ -50,11 +50,19 @@ if os.path.exists(CONFIG_FILE):
     except Exception as e:
         print(f"⚠️ เกิดข้อผิดพลาดในการอ่าน config.json: {e}")
 
-if not AUTH_TOKEN or not GROUP_A_ID or not GROUP_B_ID:
+# รายชื่อสมาชิก/แอดมินที่ได้รับอนุญาตให้ส่งคำสั่ง (Whitelist) - ถ้าไม่ระบุคืออนุญาตเฉพาะตัวเอง (my_mid)
+ALLOWED_USERS_RAW = os.getenv("ALLOWED_USERS", "").strip() or str(saved_cfg.get("allowed_users", "")).strip()
+ALLOWED_USERS = set(filter(None, [u.strip() for u in ALLOWED_USERS_RAW.split(",")])) if ALLOWED_USERS_RAW else set()
+
+# รายชื่อบอท Master ในกลุ่ม B (ถ้าไม่ระบุจะใช้วิธีตรวจจับบอทอัตโนมัติ)
+MASTER_BOT_MIDS_RAW = os.getenv("MASTER_BOT_MIDS", "").strip() or str(saved_cfg.get("master_bot_mids", "")).strip()
+MASTER_BOT_MIDS = set(filter(None, [b.strip() for b in MASTER_BOT_MIDS_RAW.split(",")])) if MASTER_BOT_MIDS_RAW else set()
+
+if not AUTH_TOKEN or not GROUP_B_ID:
     print("=" * 65)
     print("⚠️ ยังไม่ได้เข้าสู่ระบบหรือตั้งค่ากลุ่ม LINE สำหรับ Bridge")
     print("=" * 65)
-    print("ไม่พบ Token หรือ ID กลุ่ม LINE ต้นทาง/ปลายทางใน config.json")
+    print("ไม่พบ Token หรือ ID กลุ่ม LINE ปลายทาง B ใน config.json")
     print("\n👉 วิธีเริ่มใช้งาน:")
     print("1. รันไฟล์ '1_LOGIN.bat' เพื่อสแกน QR Code และเลือกกลุ่มที่ต้องการเชื่อมต่อ")
     print("2. ระบบจะสร้างไฟล์ config.json ให้อัตโนมัติ จากนั้นรัน '2_RUN_BRIDGE.bat' ได้ทันที")
@@ -240,11 +248,12 @@ def send_msg(to_mid, text):
         except Exception:
             return cl.sendMessage(to_mid, text)
 
-# เริ่มต้นจดจำ Message ID เก่าในทั้งสองกลุ่ม เพื่อไม่ให้ยิงข้อความเก่าซ้ำ
+# เริ่มต้นจดจำ Message ID เก่าในกลุ่มปลายทางและกลุ่ม A (ถ้ามี) เพื่อไม่ให้ยิงข้อความเก่าซ้ำ
 try:
-    for m in cl.getRecentMessagesV2(GROUP_A_ID, 15) or []:
-        if m.get(4):
-            SEEN_A.add(m.get(4))
+    if GROUP_A_ID:
+        for m in cl.getRecentMessagesV2(GROUP_A_ID, 15) or []:
+            if m.get(4):
+                SEEN_A.add(m.get(4))
     for m in cl.getRecentMessagesV2(GROUP_B_ID, 15) or []:
         if m.get(4):
             SEEN_B.add(m.get(4))
@@ -333,59 +342,78 @@ def private_msg_loop():
                     continue
                 SEEN_PRIVATE.add(msg_id)
                 
-                # ตรวจสอบว่าเป็นแชทส่วนตัว 1:1 หรือไม่ (toType == 0 หรือไม่ใช่กลุ่ม c...)
+                # จำแนกประเภทห้องแชท (0 = แชทส่วนตัว 1:1, 1 = ห้องแชทหลายคน, 2 = กลุ่ม)
                 to_type = cl.checkAndGetValue(msg, 'toType', 3) or msg.get(3)
                 to_mid = msg.get(2) or ""
                 sender = msg.get(1) or ""
-                
-                # หากเป็นกลุ่ม ให้ข้ามเพราะมีลูปหลัก getRecentMessagesV2 ดูแลอยู่แล้ว
+
+                # ข้ามข้อความทั้งหมดที่เกิดขึ้นในกลุ่มปลายทาง B เพื่อป้องกันลูปวนกลับ (กลุ่ม B มีลูปตรวจสอบคำตอบแยกต่างหาก)
+                if to_mid == GROUP_B_ID:
+                    continue
+
+                # คำนวณเป้าหมายสำหรับตอบกลับ:
+                # - ถ้าเป็นกลุ่ม (to_type == 2 หรือขึ้นต้นด้วย c): กลุ่มต้นทางคือ to_mid
+                # - ถ้าเป็นแชทส่วนตัว 1:1 (ขึ้นต้นด้วย u): ถ้าเพื่อนทักมา reply_target คือ sender, ถ้าเราพิมพ์เอง reply_target คือ to_mid
                 if to_type == 2 or str(to_mid).startswith('c'):
+                    reply_target = to_mid
+                    chat_label = f"กลุ่ม {to_mid[:10]}..."
+                else:
+                    reply_target = sender if sender != my_mid else to_mid
+                    chat_label = f"แชทส่วนตัว 1:1 จาก {sender[:10]}..."
+
+                if not reply_target:
                     continue
-                    
-                # คำนวณเป้าหมายสำหรับตอบกลับ (ถ้าเพื่อนทักมา reply_target คือเพื่อน, ถ้าเราพิมพ์เองในห้องแชทตัวเอง reply_target คือ to_mid)
-                reply_target = sender if sender != my_mid else to_mid
-                if not reply_target or not str(reply_target).startswith('u'):
-                    continue
-                    
+
                 text = extract_text(msg).strip()
                 if not text:
                     continue
-                    
-                # ข้ามข้อความที่บอทเพิ่งตอบกลับไป
+
+                # ข้ามข้อความที่บอทเพิ่งดีดกลับมาตอบ
                 with LOCK:
                     if text in BOT_REPLIES_SENT:
                         BOT_REPLIES_SENT.discard(text)
                         continue
-                    
-                print(f"🔔 [ข้อความใหม่ในแชทส่วนตัว 1:1] จาก {sender}: '{text}'")
-                
+
                 # กรองคำสั่ง: ต้องมีสัญลักษณ์ # หรือ $ หรือ %
                 TRIGGER_SYMBOLS = ['#', '$', '%']
                 if not any(sym in text for sym in TRIGGER_SYMBOLS):
                     continue
-                    
+
+                # 🛡️ [Access Control / Anti-Spoofing]: ตรวจสอบสิทธิ์ผู้ส่งคำสั่ง
+                # ถ้ามีการกำหนด ALLOWED_USERS ผู้ส่งต้องอยู่ใน whitelist หรือเป็นตัวเอง (my_mid)
+                # ถ้าไม่ได้กำหนด ALLOWED_USERS อนุญาตให้ทุกคนในกลุ่มส่งได้ แต่แชท 1:1 ต้องเป็นตัวเองเท่านั้น
+                is_authorized = False
+                if ALLOWED_USERS:
+                    is_authorized = (sender in ALLOWED_USERS or sender == my_mid)
+                else:
+                    is_authorized = (to_type == 2 or str(to_mid).startswith('c') or sender == my_mid)
+
+                if not is_authorized:
+                    print(f"⛔ [สกัดกั้นคำสั่งที่ไม่ได้รับอนุญาต] จาก {sender} ({chat_label}): '{text}'")
+                    continue
+
                 target_key = extract_target_key(text)
                 if target_key:
-                    print(f"📥 [ตรวจพบคำสั่ง 1:1 ส่วนตัว ({', '.join(TRIGGER_SYMBOLS)})] '{text}' | Target Key: {target_key}")
-                    
+                    print(f"📥 [ตรวจพบคำสั่งจาก {chat_label}] '{text}' | Target Key: {target_key}")
+
                     with LOCK:
                         PENDING_REQUESTS[target_key] = {
                             "source_group": reply_target,
                             "timestamp": time.time(),
                             "cmd": text
                         }
-                        
+
                     # ดีดคำสั่งเข้าปลายทาง B ทันที
                     try:
                         send_msg(GROUP_B_ID, text)
                         with LOCK:
                             METRICS["routed_a_to_b"] += 1
-                        print(f"⚡ [ยิงจากแชทส่วนตัว -> ปลายทาง B ({target_b_type}) สำเร็จ]: '{text}'")
+                        print(f"⚡ [ยิงจาก {chat_label} -> ปลายทาง B ({target_b_type}) สำเร็จ]: '{text}'")
                     except Exception as e:
                         print(f"❌ ยิงเข้าปลายทาง B ล้มเหลว: {e}")
                 else:
-                    print(f"ℹ️ [แชทส่วนตัว] มีสัญลักษณ์คำสั่ง ({', '.join(TRIGGER_SYMBOLS)}) แต่ไม่พบหมายเลขหรือพารามิเตอร์: '{text}'")
-                    
+                    print(f"ℹ️ [{chat_label}] มีสัญลักษณ์คำสั่ง ({', '.join(TRIGGER_SYMBOLS)}) แต่ไม่พบหมายเลขหรือพารามิเตอร์: '{text}'")
+
         except Exception as e:
             time.sleep(1.5)
 
@@ -394,9 +422,9 @@ threading.Thread(target=private_msg_loop, daemon=True).start()
 while True:
     try:
         # ====================================================
-        # 1. ตรวจสอบ "กลุ่ม A" (ข้อความคำสั่งจากผู้ใช้หรือตัวเอง)
+        # 1. ตรวจสอบ "กลุ่ม A" (ถ้ามีการระบุ GROUP_A_ID ไว้ในคอนฟิก)
         # ====================================================
-        recent_a = cl.getRecentMessagesV2(GROUP_A_ID, 15) or []
+        recent_a = cl.getRecentMessagesV2(GROUP_A_ID, 15) or [] if GROUP_A_ID else []
         new_msgs_a = [m for m in recent_a if m.get(4) and m.get(4) not in SEEN_A]
         
         # จัดเรียงจากเก่าไปใหม่ เพื่อส่งตามลำดับที่พิมพ์จริง
@@ -422,6 +450,11 @@ while True:
             TRIGGER_SYMBOLS = ['#', '$', '%']
             if not any(sym in text for sym in TRIGGER_SYMBOLS):
                 # ข้อความทั่วไปที่ไม่มีสัญลักษณ์คำสั่ง (#, $, %) จะไม่ถูกส่งไปกลุ่ม B
+                continue
+
+            # 🛡️ [Access Control]: ตรวจสอบสิทธิ์ผู้ส่งในกลุ่ม A
+            if ALLOWED_USERS and (sender not in ALLOWED_USERS and sender != my_mid):
+                print(f"⛔ [กลุ่ม A] สกัดกั้นคำสั่งจากสมาชิกที่ไม่อยู่ใน Whitelist: {sender}")
                 continue
 
             # สกัดหมายเลขเป้าหมาย (รองรับทั้ง 13 หลัก, 10 หลัก, และเลขอื่นๆ)
@@ -475,10 +508,10 @@ while True:
                 print(f"ℹ️ [ข้ามคำสั่งของผู้ใช้อื่นในปลายทาง B]: จาก {sender}: '{text[:60]}'")
                 continue
 
-            # 2. ถ้าผู้ส่งนี้เคยพิมพ์คำสั่งมาก่อน แสดงว่าเป็นสมาชิกทั่วไปในกลุ่ม B (ไม่ใช่บอท) ให้ข้ามข้อความแชทคุยเล่น
-            if sender in HUMAN_SENDERS_B:
+            # 3. ถ้ามีการระบุ MASTER_BOT_MIDS ผู้ส่งต้องเป็นบอท Master ในลิสต์เท่านั้น
+            if MASTER_BOT_MIDS and sender not in MASTER_BOT_MIDS:
                 continue
-                
+
             print(f"🔔 [ข้อความใหม่ในปลายทาง B ({target_b_type})] จาก {sender}: '{text[:60]}...'")
             
             matched_target = None
